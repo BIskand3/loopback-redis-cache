@@ -1,4 +1,11 @@
 module.exports = function(Model, options) {
+
+    var cachExpire = 0; // set default to 5 minutes
+
+    if(options.expiryInSecs){ // set from config
+      cachExpire = options.expiryInSecs;
+    }
+
     if(options.client){
         var clientSettings = options.client;
     }else{
@@ -9,7 +16,7 @@ module.exports = function(Model, options) {
     var redis = require("redis"),
         client = redis.createClient(clientSettings);
 
-    var redisDeletePattern = require('redis-delete-pattern'); 
+    var redisDeletePattern = require('redis-delete-pattern');
 
     client.on("error", function (err) {
         console.log(err);
@@ -17,7 +24,7 @@ module.exports = function(Model, options) {
         if(err.toString().indexOf("invalid password") !== -1){
             console.log("Invalid password... reconnecting with server config...");
             var app = require('../../server/server');
-            var clientSettings = app.get('redis');        
+            var clientSettings = app.get('redis');
             client = redis.createClient(clientSettings);
         }
     });
@@ -26,9 +33,11 @@ module.exports = function(Model, options) {
     Model.beforeRemote('**', function(ctx, res, next) {
         // get all find methods and search first in cache
         if((ctx.method.name.indexOf("find") !== -1 || ctx.method.name.indexOf("__get") !== -1) && client.connected){
-            if(typeof ctx.req.query.cache != 'undefined'){
+            if(cachExpire>0){
                 var modelName = ctx.method.sharedClass.name;
-                var cachExpire = ctx.req.query.cache;
+                if (ctx.req.query.cache) {
+                  cachExpire = ctx.req.query.cache;
+                }
 
                 // set key name
                 var cache_key = modelName+'_'+new Buffer(JSON.stringify(ctx.req.query)).toString('base64');
@@ -47,24 +56,26 @@ module.exports = function(Model, options) {
                     }else{
                         //return data
                         next();
-                    }                
-                });    
+                    }
+                });
 
             }else{
                 next();
             }
         }else{
             next();
-        }            
-    });    
+        }
+    });
 
     Model.afterRemote('**', function(ctx, res, next) {
         // get all find methods and search first in cache - if not exist save in cache
         if((ctx.method.name.indexOf("find") !== -1 || ctx.method.name.indexOf("__get") !== -1) && client.connected){
-            if(typeof ctx.req.query.cache != 'undefined'){
+            if(cachExpire>0){
                 var modelName = ctx.method.sharedClass.name;
-                var cachExpire = ctx.req.query.cache;
-                
+                if (ctx.req.query.cache) {
+                  cachExpire = ctx.req.query.cache;
+                }
+
                 // set key name
                 var cache_key = modelName+'_'+new Buffer(JSON.stringify(ctx.req.query)).toString('base64');
                 // search for cache
@@ -80,23 +91,25 @@ module.exports = function(Model, options) {
                         next();
                     }else{
                         next();
-                    }               
-                });    
+                    }
+                });
 
             }else{
                 next();
             }
         }else{
             next();
-        }        
+        }
     });
 
     Model.afterRemote('**', function(ctx, res, next) {
         // delete cache on patchOrCreate, create, delete, update, destroy, upsert
         if((ctx.method.name.indexOf("find") == -1 && ctx.method.name.indexOf("__get") == -1) && client.connected){
             var modelName = ctx.method.sharedClass.name;
-            var cachExpire = ctx.req.query.cache;
-            
+            if (ctx.req.query.cache) {
+              cachExpire = ctx.req.query.cache;
+            }
+
             // set key name
             var cache_key = modelName+'_*';
 
@@ -113,6 +126,6 @@ module.exports = function(Model, options) {
 
         }else{
             next();
-        }    
+        }
     });
 }
